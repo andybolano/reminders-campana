@@ -56,19 +56,13 @@ class NotificationService {
     for (const visita of visitas) {
       try {
         if (this.sentMessagesToday.has(visita.telefono)) {
-          logger.skip(`${visita.nombre} - Ya recibió mensaje en esta ejecución`);
-          continue;
-        }
-
-        if (visita.hasBeenNotified()) {
-          logger.skip(`${visita.nombre} - Ya fue notificado hoy`);
+          logger.skip(`${visita.nombre} - Número duplicado en el sheet`);
           continue;
         }
 
         const result = await this.messageService.sendMessage(visita, tipo);
 
         if (result.success) {
-          await this.googleSheetsService.markAsNotified(visita.rowIndex);
           this.sentMessagesToday.add(visita.telefono);
           stats.sent++;
           logger.info(`✅ ${tipo} enviado a ${visita.nombre}`);
