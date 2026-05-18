@@ -2,49 +2,39 @@
 const NotificationService = require("./services/notificationService");
 const config = require("./config/environment");
 const logger = require("./utils/logger");
+const DateFormatter = require("./utils/dateFormatter");
 
-/**
- * Aplicación principal para el sistema de recordatorios
- * Optimizada para Railway Cron - ejecución stateless
- */
 class ReminderApp {
   constructor() {
     this.notificationService = new NotificationService();
   }
 
-  /**
-   * Punto de entrada principal
-   */
   async main() {
     try {
-      // Mostrar información de inicio
       this._showStartupInfo();
 
-      // Parsear argumentos de línea de comandos
-      const mode = this._parseArguments();
+      const { mode, tipo } = this._parseArguments();
 
-      // Ejecutar según el modo
       switch (mode) {
         case "once":
-          await this._runOnce();
+          await this._runOnce(tipo);
           break;
         case "test":
           await this._runTests();
           break;
         case "notifications":
-          await this._runNotificationsOnly();
+          await this._runNotificationsOnly(tipo);
           break;
         case "reminders":
-          await this._runRemindersOnly();
+          await this._runRemindersOnly(tipo);
           break;
         case "diagnostic":
           await this._runDiagnostic();
           break;
         default:
-          await this._runOnce(); // Default: ejecutar proceso completo
+          await this._runOnce(tipo);
       }
 
-      // Terminar proceso explícitamente para Railway
       process.exit(0);
     } catch (error) {
       logger.error("Error en aplicación principal:", error.message);
@@ -52,68 +42,37 @@ class ReminderApp {
     }
   }
 
-  /**
-   * Ejecuta una vez y termina (modo principal para Railway Cron)
-   * @private
-   */
-  async _runOnce() {
-    logger.info("🎯 Ejecutando proceso de recordatorios...");
+  async _runOnce(tipo) {
+    logger.info(`🎯 Ejecutando proceso - Tipo: ${tipo}`);
 
-    const stats = await this.notificationService.executeNotificationProcess();
+    const stats = await this.notificationService.executeNotificationProcess(tipo);
 
     logger.success("✅ Ejecución completada exitosamente");
-    logger.info(
-      `📊 Resumen: ${stats.totalMessages} mensajes enviados a ${stats.uniqueUsers} usuarios`
-    );
+    logger.info(`📊 Resumen: ${stats.sent} mensajes enviados a ${stats.uniqueUsers} visitas`);
 
     return stats;
   }
 
-  /**
-   * Ejecuta solo notificaciones iniciales
-   * @private
-   */
-  async _runNotificationsOnly() {
-    logger.info("📮 Ejecutando solo notificaciones iniciales...");
+  async _runNotificationsOnly(tipo) {
+    logger.info(`📮 Ejecutando mensajes - Tipo: ${tipo}`);
 
-    const stats = await this.notificationService.executeNotificationsOnly();
+    const stats = await this.notificationService.executeRemindersOnly(tipo);
 
-    logger.success(
-      `✅ Notificaciones completadas: ${stats.notifications} enviadas`
-    );
+    logger.success(`✅ Completado: ${stats.sent} enviados`);
     return stats;
   }
 
-  /**
-   * Ejecuta solo recordatorios
-   * @private
-   */
-  async _runRemindersOnly() {
-    logger.info("⏰ Ejecutando solo recordatorios...");
-
-    const stats = await this.notificationService.executeRemindersOnly();
-
-    logger.success(
-      `✅ Recordatorios completados: ${
-        stats.reminders + stats.todayReminders
-      } enviados`
-    );
-    return stats;
+  async _runRemindersOnly(tipo) {
+    return this._runNotificationsOnly(tipo);
   }
 
-  /**
-   * Ejecuta pruebas de conectividad
-   * @private
-   */
   async _runTests() {
     logger.info("🧪 Probando conectividad...");
 
     const results = await this.notificationService.testConnectivity();
 
     if (results.googleSheets.success) {
-      logger.success(
-        `Google Sheets: ✅ Conectado (${results.googleSheets.recordCount} registros)`
-      );
+      logger.success(`Google Sheets: ✅ Conectado (${results.googleSheets.recordCount} registros)`);
     } else {
       logger.error(`Google Sheets: ❌ ${results.googleSheets.error}`);
     }
@@ -127,10 +86,6 @@ class ReminderApp {
     return results;
   }
 
-  /**
-   * Muestra información de diagnóstico
-   * @private
-   */
   async _runDiagnostic() {
     logger.info("🔍 Obteniendo información de diagnóstico...");
 
@@ -143,38 +98,27 @@ class ReminderApp {
     return info;
   }
 
-  /**
-   * Parsea argumentos de línea de comandos
-   * @private
-   */
   _parseArguments() {
     const args = process.argv.slice(2);
 
-    if (args.includes("--test")) return "test";
-    if (args.includes("--notifications")) return "notifications";
-    if (args.includes("--reminders")) return "reminders";
-    if (args.includes("--diagnostic")) return "diagnostic";
+    const tipoArg = args.find((a) => a.startsWith("--tipo="));
+    const tipo = tipoArg ? tipoArg.split("=")[1] : "invitacion";
 
-    // Modo por defecto: ejecutar proceso completo
-    return "once";
+    if (args.includes("--test")) return { mode: "test", tipo };
+    if (args.includes("--notifications")) return { mode: "notifications", tipo };
+    if (args.includes("--reminders")) return { mode: "reminders", tipo };
+    if (args.includes("--diagnostic")) return { mode: "diagnostic", tipo };
+
+    return { mode: "once", tipo };
   }
 
-  /**
-   * Muestra información de inicio
-   * @private
-   */
   _showStartupInfo() {
-    console.log("🎤 Sistema de Recordatorios - Iglesia");
-    logger.info(`📅 ${new Date().toLocaleDateString("es-ES")}`);
+    console.log("🎤 Sistema de Recordatorios Diarios - Campaña Evangelística");
+    logger.info(`📅 ${DateFormatter.todayFormatted()}`);
     logger.info(`🌐 ${process.env.NODE_ENV || "development"}`);
   }
-
-
 }
 
-/**
- * Ejecutar aplicación si es llamada directamente
- */
 if (require.main === module) {
   const app = new ReminderApp();
   app.main().catch((error) => {

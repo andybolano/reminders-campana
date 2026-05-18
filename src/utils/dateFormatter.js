@@ -138,6 +138,28 @@ class DateFormatter {
   }
 
   /**
+   * Formatea la fecha actual en formato: "Lunes, 22 de Septiembre"
+   * @returns {string} Fecha de hoy formateada
+   */
+  static todayFormatted() {
+    const hoy = new Date();
+    const diaSemana = this.DIAS_SEMANA[hoy.getDay()];
+    const dia = hoy.getDate();
+    const mes = this.MESES[hoy.getMonth()];
+
+    return `${diaSemana}, ${dia} de ${mes}`;
+  }
+
+  /**
+   * Obtiene el número del día de la semana (1=Domingo, 2=Lunes, etc.)
+   * @returns {number} Número del día de la semana
+   */
+  static getDayOfWeekNumber() {
+    const hoy = new Date();
+    return hoy.getDay() + 1; // getDay() devuelve 0-6, necesitamos 1-7
+  }
+
+  /**
    * Formatea fecha para almacenamiento (YYYY-MM-DD)
    * @param {Date} fecha - Fecha a formatear
    * @returns {string} Fecha en formato ISO

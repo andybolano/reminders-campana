@@ -40,6 +40,12 @@ class Logger {
     }
   }
 
+  skip(message, ...args) {
+    if (this.level >= Logger.LEVELS.INFO) {
+      console.log(`⏭️  ${message}`, ...args);
+    }
+  }
+
   summary(message, ...args) {
     if (this.level >= Logger.LEVELS.INFO) {
       console.log(`📊 ${message}`, ...args);
@@ -52,6 +58,7 @@ class Logger {
 
   logMessageSent(type, name, sid) {
     const typeMap = {
+      recordatorio_diario: "📮 RECORDATORIO_DIARIO",
       notificacion: "📮 NOTIFICACIÓN INICIAL",
       recordatorio: "⏰ RECORDATORIO",
       hoy: "🎤 HOY PREDICA",
@@ -68,13 +75,11 @@ class Logger {
 
   logFinalSummary(stats) {
     this.info(
-      `📊 Procesados: ${stats.processed} | Mensajes: ${stats.totalMessages} | Usuarios: ${stats.uniqueUsers}`
+      `📊 Procesados: ${stats.processed} | Enviados: ${stats.sent} | Usuarios: ${stats.uniqueUsers}`
     );
-    if (stats.notifications > 0)
-      this.info(`📮 Notificaciones: ${stats.notifications}`);
-    if (stats.reminders > 0) this.info(`⏰ Recordatorios: ${stats.reminders}`);
-    if (stats.todayReminders > 0)
-      this.info(`🎤 Día actual: ${stats.todayReminders}`);
+    if (stats.errors > 0) {
+      this.warn(`❌ Errores: ${stats.errors}`);
+    }
   }
 }
 

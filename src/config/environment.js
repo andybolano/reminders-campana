@@ -14,9 +14,8 @@ class EnvironmentConfig {
       fromNumber: process.env.TW_FROM,
       useTemplates: process.env.USE_TWILIO_TEMPLATES === "true",
       templates: {
-        notification: process.env.TWILIO_TEMPLATE_NOTIFICACION,
-        reminder: process.env.TWILIO_TEMPLATE_RECORDATORIO,
-        today: process.env.TWILIO_TEMPLATE_RECORDATORIO_HOY,
+        invitacion: process.env.TWILIO_TEMPLATE_INVITACION,
+        recordatorio: process.env.TWILIO_TEMPLATE_RECORDATORIO,
       },
     };
   }
@@ -29,11 +28,16 @@ class EnvironmentConfig {
     };
   }
 
+  // Campaña Configuration
+  get campaign() {
+    return {
+      startDate: process.env.CAMPAIGN_START_DATE,
+    };
+  }
+
   // Business Logic Configuration
   get business() {
     return {
-      reminderDaysLimit: 15,
-      cooldownDays: 7,
       yesMarker: "sí",
     };
   }
@@ -49,7 +53,6 @@ class EnvironmentConfig {
       );
     }
 
-    // Validar que al menos una variable de credenciales de Google esté presente
     const hasGoogleCredentials =
       process.env.GOOGLE_SERVICE_ACCOUNT_KEY ||
       process.env.GOOGLE_CREDENTIALS_BASE64;

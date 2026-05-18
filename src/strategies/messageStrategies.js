@@ -1,75 +1,64 @@
 const DateFormatter = require("../utils/dateFormatter");
+const config = require("../config/environment");
 
-/**
- * Estrategia base para mensajes
- * @abstract
- */
 class MessageStrategy {
-  constructor(useTemplates, templateConfig) {
-    this.useTemplates = useTemplates;
+  constructor(templateConfig) {
     this.templateConfig = templateConfig;
   }
 
-  /**
-   * Crea las opciones del mensaje
-   * @abstract
-   */
-  createMessageOptions(predicador, fromNumber) {
+  createMessageOptions(visita, fromNumber) {
     throw new Error("Método createMessageOptions debe ser implementado");
   }
 
-  /**
-   * Obtiene el tipo de mensaje para logging
-   * @abstract
-   */
   getMessageType() {
     throw new Error("Método getMessageType debe ser implementado");
   }
 }
 
-/**
- * Estrategia para notificación inicial
- */
-class NotificationStrategy extends MessageStrategy {
-  createMessageOptions(predicador, fromNumber) {
-    const messageOptions = {
+class InvitacionStrategy extends MessageStrategy {
+  createMessageOptions(visita, fromNumber) {
+    const campaignStart = DateFormatter.parseToLocalDate(config.campaign.startDate);
+    const daysUntil = Math.round(DateFormatter.daysDifference(campaignStart, DateFormatter.today()));
+
+    return {
       from: fromNumber,
-      to: `whatsapp:${predicador.getFormattedPhone()}`,
+      to: `whatsapp:${visita.getFormattedPhone()}`,
+      contentSid: this.templateConfig.invitacion,
+      contentVariables: JSON.stringify({
+        1: visita.nombre,
+        2: daysUntil.toString(),
+      }),
     };
-
-    messageOptions.contentSid = this.templateConfig.notification;
-    messageOptions.contentVariables = JSON.stringify({
-      1: predicador.nombre,
-      2: predicador.getFormattedDate(),
-      3: predicador.iglesia,
-    });
-
-    return messageOptions;
   }
 
   getMessageType() {
-    return "notificacion";
+    return "invitacion";
   }
 }
 
-/**
- * Estrategia para recordatorio anticipado
- */
-class ReminderStrategy extends MessageStrategy {
-  createMessageOptions(predicador, fromNumber) {
-    const messageOptions = {
+class RecordatorioStrategy extends MessageStrategy {
+  createMessageOptions(visita, fromNumber) {
+    const topics = require("../config/campaignTopics");
+    const campaignStart = DateFormatter.parseToLocalDate(config.campaign.startDate);
+    const campaignDay = Math.round(DateFormatter.daysDifference(DateFormatter.today(), campaignStart)) + 1;
+
+    const topic = topics.find((t) => t.dia === campaignDay);
+
+    if (!topic) {
+      throw new Error(`No hay tema configurado para el día ${campaignDay} de la campaña`);
+    }
+
+    return {
       from: fromNumber,
-      to: `whatsapp:${predicador.getFormattedPhone()}`,
+      to: `whatsapp:${visita.getFormattedPhone()}`,
+      contentSid: this.templateConfig.recordatorio,
+      contentVariables: JSON.stringify({
+        1: campaignDay.toString(),
+        2: visita.nombre,
+        3: topic.tema,
+        4: topic.subtitulo,
+      }),
     };
-
-    messageOptions.contentSid = this.templateConfig.reminder;
-    messageOptions.contentVariables = JSON.stringify({
-      1: predicador.nombre,
-      2: predicador.getFormattedDate(),
-      3: predicador.iglesia,
-    });
-
-    return messageOptions;
   }
 
   getMessageType() {
@@ -77,81 +66,26 @@ class ReminderStrategy extends MessageStrategy {
   }
 }
 
-/**
- * Estrategia para mensaje del día
- */
-class TodayStrategy extends MessageStrategy {
-  createMessageOptions(predicador, fromNumber) {
-    const messageOptions = {
-      from: fromNumber,
-      to: `whatsapp:${predicador.getFormattedPhone()}`,
-    };
-
-    messageOptions.contentSid = this.templateConfig.today;
-    messageOptions.contentVariables = JSON.stringify({
-      1: predicador.nombre,
-      2: predicador.iglesia,
-    });
-
-    return messageOptions;
-  }
-
-  getMessageType() {
-    return "hoy";
-  }
-}
-
-/**
- * Factory para crear estrategias de mensajes
- */
 class MessageStrategyFactory {
-  constructor(useTemplates, templateConfig) {
-    this.useTemplates = useTemplates;
+  constructor(templateConfig) {
     this.templateConfig = templateConfig;
   }
 
-  /**
-   * Crea estrategia de notificación inicial
-   */
-  createNotificationStrategy() {
-    return new NotificationStrategy(this.useTemplates, this.templateConfig);
-  }
-
-  /**
-   * Crea estrategia de recordatorio
-   */
-  createReminderStrategy() {
-    return new ReminderStrategy(this.useTemplates, this.templateConfig);
-  }
-
-  /**
-   * Crea estrategia de mensaje del día
-   */
-  createTodayStrategy() {
-    return new TodayStrategy(this.useTemplates, this.templateConfig);
-  }
-
-  /**
-   * Obtiene estrategia por tipo
-   */
-  getStrategy(type) {
-    switch (type) {
-      case "notificacion":
-        return this.createNotificationStrategy();
+  getStrategy(tipo) {
+    switch (tipo) {
+      case "invitacion":
+        return new InvitacionStrategy(this.templateConfig);
       case "recordatorio":
-        return this.createReminderStrategy();
-      case "hoy":
-        return this.createTodayStrategy();
+        return new RecordatorioStrategy(this.templateConfig);
       default:
-        throw new Error(`Tipo de mensaje no soportado: ${type}`);
+        throw new Error(`Tipo de mensaje no soportado: ${tipo}`);
     }
   }
 }
 
 module.exports = {
   MessageStrategy,
-  NotificationStrategy,
-  ReminderStrategy,
-  TodayStrategy,
+  InvitacionStrategy,
+  RecordatorioStrategy,
   MessageStrategyFactory,
 };

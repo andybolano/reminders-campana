@@ -1,49 +1,29 @@
-const Predicador = require("../models/predicador");
+const Visita = require("../models/visita");
 const GoogleSheetsService = require("./googleSheetsService");
 const MessageService = require("./messageService");
 const DateFormatter = require("../utils/dateFormatter");
 const config = require("../config/environment");
 const logger = require("../utils/logger");
 
-/**
- * Servicio principal para manejo de notificaciones y recordatorios
- * Implementa la lógica de negocio principal del sistema
- */
 class NotificationService {
   constructor() {
     this.googleSheetsService = new GoogleSheetsService();
     this.messageService = new MessageService();
-    this.sentMessagesToday = new Set(); // Evita múltiples mensajes al mismo usuario
+    this.sentMessagesToday = new Set();
   }
 
   /**
-   * Ejecuta el proceso completo de notificaciones
-   * @returns {Promise<Object>} Estadísticas de la ejecución
+   * Ejecuta el proceso de mensajes según el tipo indicado
+   * @param {"invitacion"|"recordatorio"} tipo
    */
-  async executeNotificationProcess() {
-    logger.info("📧 Iniciando proceso de notificaciones y recordatorios...");
-    logger.info(
-      `🔧 Modo: ${
-        config.twilio.useTemplates
-          ? "Templates (Sandbox)"
-          : "Texto libre (Producción)"
-      }`
-    );
+  async executeNotificationProcess(tipo = "invitacion") {
+    logger.info(`📧 Iniciando proceso - Tipo: ${tipo}`);
 
-    const stats = {
-      processed: 0,
-      notifications: 0,
-      reminders: 0,
-      todayReminders: 0,
-      errors: 0,
-      uniqueUsers: 0,
-    };
+    const stats = { processed: 0, sent: 0, errors: 0, uniqueUsers: 0 };
 
     try {
-      // Validar configuración
-      this._validateConfiguration();
+      this._validateConfiguration(tipo);
 
-      // Leer datos de Google Sheets
       const rawData = await this.googleSheetsService.readSheetData();
 
       if (rawData.length === 0) {
@@ -51,204 +31,63 @@ class NotificationService {
         return stats;
       }
 
-      // Convertir a objetos Predicador
-      const predicadores = Predicador.fromRawDataArray(rawData);
-      stats.processed = predicadores.length;
+      const visitas = Visita.fromRawDataArray(rawData);
+      stats.processed = visitas.length;
 
-      logger.info(`📝 Predicadores válidos: ${predicadores.length}`);
-      logger.info(
-        `📅 Fecha de hoy: ${DateFormatter.today().toLocaleDateString("es-ES")}`
-      );
+      logger.info(`📝 Visitas válidas: ${visitas.length}`);
+      logger.info(`📅 Fecha de hoy: ${DateFormatter.todayFormatted()}`);
 
-      // Ejecutar los 3 pasos del proceso
-      await this._executeStep1(predicadores, stats);
-      await this._executeStep2(predicadores, stats);
-      await this._executeStep3(predicadores, stats);
+      await this._sendMessages(visitas, tipo, stats);
 
-      // Calcular estadísticas finales
-      stats.totalMessages =
-        stats.notifications + stats.reminders + stats.todayReminders;
       stats.uniqueUsers = this.sentMessagesToday.size;
-
-      // Mostrar resumen final
       logger.logFinalSummary(stats);
 
       return stats;
     } catch (error) {
-      logger.error(
-        "Error ejecutando proceso de notificaciones:",
-        error.message
-      );
+      logger.error("Error ejecutando proceso:", error.message);
       stats.errors++;
       throw error;
     }
   }
 
-  /**
-   * PASO 1: Notificaciones iniciales
-   * @private
-   */
-  async _executeStep1(predicadores, stats) {
-    logger.logStep(1, "Enviando notificaciones iniciales...");
+  async _sendMessages(visitas, tipo, stats) {
+    logger.info(`📮 Enviando ${tipo}s...`);
 
-    for (const predicador of predicadores) {
+    for (const visita of visitas) {
       try {
-        // Saltar si ya recibió mensaje hoy
-        if (this.sentMessagesToday.has(predicador.telefono)) {
-          logger.skip(
-            `${predicador.nombre} - Ya recibió mensaje en esta ejecución`
-          );
+        if (this.sentMessagesToday.has(visita.telefono)) {
+          logger.skip(`${visita.nombre} - Ya recibió mensaje en esta ejecución`);
           continue;
         }
 
-        // Verificar si necesita notificación inicial
-        if (!predicador.hasBeenNotified()) {
-          // Enviar notificación
-          const result = await this.messageService.sendNotification(predicador);
+        if (visita.hasBeenNotified()) {
+          logger.skip(`${visita.nombre} - Ya fue notificado hoy`);
+          continue;
+        }
 
-          if (result.success) {
-            // Marcar como notificado
-            await this.googleSheetsService.markAsNotified(predicador.rowIndex);
+        const result = await this.messageService.sendMessage(visita, tipo);
 
-            // Marcar fecha de recordatorio para cooldown
-            await this.googleSheetsService.markReminderSent(
-              predicador.rowIndex
-            );
-
-            // Agregar a lista de usuarios contactados hoy
-            this.sentMessagesToday.add(predicador.telefono);
-            stats.notifications++;
-          } else {
-            logger.error(
-              `Error en notificación inicial para ${predicador.nombre}:`,
-              result.error
-            );
-            stats.errors++;
-          }
+        if (result.success) {
+          await this.googleSheetsService.markAsNotified(visita.rowIndex);
+          this.sentMessagesToday.add(visita.telefono);
+          stats.sent++;
+          logger.info(`✅ ${tipo} enviado a ${visita.nombre}`);
+        } else {
+          logger.error(`Error enviando ${tipo} a ${visita.nombre}:`, result.error);
+          stats.errors++;
         }
       } catch (error) {
-        logger.error(
-          `Error procesando notificación inicial para ${predicador.nombre}:`,
-          error.message
-        );
+        logger.error(`Error procesando ${visita.nombre}:`, error.message);
         stats.errors++;
       }
     }
   }
 
-  /**
-   * PASO 2: Recordatorios anticipados (1-15 días)
-   * @private
-   */
-  async _executeStep2(predicadores, stats) {
-    logger.logStep(2, "Enviando recordatorios anticipados (1-15 días)...");
-
-    for (const predicador of predicadores) {
-      try {
-        // Saltar si ya recibió mensaje hoy
-        if (this.sentMessagesToday.has(predicador.telefono)) {
-          continue;
-        }
-
-        // Verificar si predica pronto
-        if (predicador.preachesSoon()) {
-          // Verificar cooldown
-          if (predicador.canReceiveReminder()) {
-            // Enviar recordatorio
-            const result = await this.messageService.sendReminder(predicador);
-
-            if (result.success) {
-              // Marcar fecha de recordatorio
-              await this.googleSheetsService.markReminderSent(
-                predicador.rowIndex
-              );
-
-              // Agregar a lista de usuarios contactados hoy
-              this.sentMessagesToday.add(predicador.telefono);
-              stats.reminders++;
-            } else {
-              logger.error(
-                `Error en recordatorio para ${predicador.nombre}:`,
-                result.error
-              );
-              stats.errors++;
-            }
-          }
-        }
-      } catch (error) {
-        logger.error(
-          `Error procesando recordatorio para ${predicador.nombre}:`,
-          error.message
-        );
-        stats.errors++;
-      }
-    }
-  }
-
-  /**
-   * PASO 3: Mensajes del día (predican HOY)
-   * @private
-   */
-  async _executeStep3(predicadores, stats) {
-    logger.logStep(3, "Enviando recordatorios del día (¡HOY predican!)...");
-
-    for (const predicador of predicadores) {
-      try {
-        // Saltar si ya recibió mensaje hoy
-        if (this.sentMessagesToday.has(predicador.telefono)) {
-          continue;
-        }
-
-        // Verificar si predica hoy
-        if (predicador.preachesToday()) {
-          // Verificar cooldown (mínimo 1 día)
-          const daysSince = predicador.getDaysSinceLastReminder();
-          const canSend = daysSince === null || daysSince >= 1;
-
-          if (canSend) {
-            // Enviar mensaje del día
-            const result = await this.messageService.sendTodayMessage(
-              predicador
-            );
-
-            if (result.success) {
-              // Marcar fecha de recordatorio
-              await this.googleSheetsService.markReminderSent(
-                predicador.rowIndex
-              );
-
-              // Agregar a lista de usuarios contactados hoy
-              this.sentMessagesToday.add(predicador.telefono);
-              stats.todayReminders++;
-            } else {
-              logger.error(
-                `Error en mensaje del día para ${predicador.nombre}:`,
-                result.error
-              );
-              stats.errors++;
-            }
-          }
-        }
-      } catch (error) {
-        logger.error(
-          `Error procesando mensaje del día para ${predicador.nombre}:`,
-          error.message
-        );
-        stats.errors++;
-      }
-    }
-  }
-
-  /**
-   * Valida la configuración de todos los servicios
-   * @private
-   */
-  _validateConfiguration() {
+  _validateConfiguration(tipo) {
     try {
       this.googleSheetsService.validateConfiguration();
-      this.messageService.validateConfiguration();
+      this.messageService.validateConfiguration(tipo);
       config.validateRequiredEnvVars();
-
       logger.debug("✅ Configuración validada exitosamente");
     } catch (error) {
       logger.error("❌ Error en configuración:", error.message);
@@ -256,9 +95,6 @@ class NotificationService {
     }
   }
 
-  /**
-   * Obtiene información de diagnóstico de todos los servicios
-   */
   async getDiagnosticInfo() {
     return {
       config: {
@@ -267,13 +103,10 @@ class NotificationService {
       },
       googleSheets: await this.googleSheetsService.getDiagnosticInfo(),
       messaging: this.messageService.getDiagnosticInfo(),
-      currentDate: DateFormatter.today().toISOString().split("T")[0],
+      currentDate: DateFormatter.todayFormatted(),
     };
   }
 
-  /**
-   * Prueba la conectividad de todos los servicios
-   */
   async testConnectivity() {
     logger.info("🔧 Probando conectividad de servicios...");
 
@@ -283,23 +116,15 @@ class NotificationService {
     };
 
     try {
-      // Probar Google Sheets
       const sheetData = await this.googleSheetsService.readSheetData();
-      results.googleSheets = {
-        success: true,
-        recordCount: sheetData.length,
-      };
+      results.googleSheets = { success: true, recordCount: sheetData.length };
       logger.success("Google Sheets: Conectado");
     } catch (error) {
-      results.googleSheets = {
-        success: false,
-        error: error.message,
-      };
+      results.googleSheets = { success: false, error: error.message };
       logger.error("Google Sheets: Error de conexión");
     }
 
     try {
-      // Probar Twilio
       const twilioTest = await this.messageService.testConnection();
       results.twilio = twilioTest;
 
@@ -309,55 +134,15 @@ class NotificationService {
         logger.error("Twilio: Error de conexión");
       }
     } catch (error) {
-      results.twilio = {
-        success: false,
-        error: error.message,
-      };
+      results.twilio = { success: false, error: error.message };
       logger.error("Twilio: Error de conexión");
     }
 
     return results;
   }
 
-  /**
-   * Ejecuta solo notificaciones iniciales (para testing)
-   */
-  async executeNotificationsOnly() {
-    const stats = { processed: 0, notifications: 0, errors: 0 };
-
-    try {
-      const rawData = await this.googleSheetsService.readSheetData();
-      const predicadores = Predicador.fromRawDataArray(rawData);
-      stats.processed = predicadores.length;
-
-      await this._executeStep1(predicadores, stats);
-
-      return stats;
-    } catch (error) {
-      logger.error("Error ejecutando solo notificaciones:", error.message);
-      throw error;
-    }
-  }
-
-  /**
-   * Ejecuta solo recordatorios (para testing)
-   */
-  async executeRemindersOnly() {
-    const stats = { processed: 0, reminders: 0, todayReminders: 0, errors: 0 };
-
-    try {
-      const rawData = await this.googleSheetsService.readSheetData();
-      const predicadores = Predicador.fromRawDataArray(rawData);
-      stats.processed = predicadores.length;
-
-      await this._executeStep2(predicadores, stats);
-      await this._executeStep3(predicadores, stats);
-
-      return stats;
-    } catch (error) {
-      logger.error("Error ejecutando solo recordatorios:", error.message);
-      throw error;
-    }
+  async executeRemindersOnly(tipo = "invitacion") {
+    return this.executeNotificationProcess(tipo);
   }
 }
 

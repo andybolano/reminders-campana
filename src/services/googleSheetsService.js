@@ -1,41 +1,26 @@
 const { google } = require("googleapis");
-const fs = require("fs");
 const config = require("../config/environment");
 const logger = require("../utils/logger");
 
-/**
- * Servicio para manejo de Google Sheets
- * Implementa Repository Pattern para abstracción de datos
- */
 class GoogleSheetsService {
   constructor() {
     this.sheets = null;
     this.auth = null;
   }
 
-  /**
-   * Configura la autenticación con Google Sheets
-   * Compatible con Railway (variables de entorno) y local (archivo)
-   * @private
-   */
   async _setupAuth() {
     try {
       let credentials;
 
-      // Opción 1: JSON directo
       if (process.env.GOOGLE_SERVICE_ACCOUNT_KEY) {
         credentials = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_KEY);
-      }
-      // Opción 2: Base64 (Railway y Local)
-      else if (process.env.GOOGLE_CREDENTIALS_BASE64) {
+      } else if (process.env.GOOGLE_CREDENTIALS_BASE64) {
         const decoded = Buffer.from(
           process.env.GOOGLE_CREDENTIALS_BASE64,
           "base64"
         ).toString();
         credentials = JSON.parse(decoded);
-      }
-      // Error: No se configuraron variables de entorno
-      else {
+      } else {
         throw new Error(
           "No se encontraron credenciales de Google en variables de entorno. Configura GOOGLE_SERVICE_ACCOUNT_KEY o GOOGLE_CREDENTIALS_BASE64"
         );
@@ -49,28 +34,17 @@ class GoogleSheetsService {
       const authClient = await this.auth.getClient();
       this.sheets = google.sheets({ version: "v4", auth: authClient });
     } catch (error) {
-      logger.error(
-        "❌ Error configurando autenticación Google Sheets:",
-        error.message
-      );
+      logger.error("❌ Error configurando autenticación Google Sheets:", error.message);
       throw new Error(`Error de autenticación: ${error.message}`);
     }
   }
 
-  /**
-   * Asegura que la autenticación esté configurada
-   * @private
-   */
   async _ensureAuth() {
     if (!this.sheets) {
       await this._setupAuth();
     }
   }
 
-  /**
-   * Lee datos del Google Sheet
-   * @returns {Promise<Array>} Array de objetos con los datos del sheet
-   */
   async readSheetData() {
     await this._ensureAuth();
 
@@ -87,7 +61,6 @@ class GoogleSheetsService {
         return [];
       }
 
-      // Convertir array de arrays a array de objetos
       const headers = rows[0];
       const dataRows = rows.slice(1);
 
@@ -108,17 +81,10 @@ class GoogleSheetsService {
     }
   }
 
-  /**
-   * Actualiza una celda específica en el Google Sheet
-   * @param {number} rowIndex - Índice de la fila (0-based)
-   * @param {string} columnName - Nombre de la columna
-   * @param {string} value - Valor a escribir
-   */
   async updateCell(rowIndex, columnName, value) {
     await this._ensureAuth();
 
     try {
-      // Primero obtenemos los headers para encontrar el índice de la columna
       const headers = await this._getHeaders();
       const columnIndex = this._findColumnIndex(headers, columnName);
 
@@ -126,11 +92,10 @@ class GoogleSheetsService {
         throw new Error(`Columna "${columnName}" no encontrada`);
       }
 
-      // Convertir índices a notación A1
       const columnLetter = this._getColumnLetter(columnIndex);
-      const cellRange = `${columnLetter}${rowIndex + 2}`; // +2 porque row 1 son headers y rowIndex es 0-based
+      const cellRange = `${columnLetter}${rowIndex + 2}`;
 
-      const updateResponse = await this.sheets.spreadsheets.values.update({
+      await this.sheets.spreadsheets.values.update({
         spreadsheetId: config.googleSheets.sheetId,
         range: cellRange,
         valueInputOption: "RAW",
@@ -142,41 +107,29 @@ class GoogleSheetsService {
       return true;
     } catch (error) {
       logger.error(
-        `Error actualizando celda (fila ${
-          rowIndex + 2
-        }, columna ${columnName}):`,
+        `Error actualizando celda (fila ${rowIndex + 2}, columna ${columnName}):`,
         error.message
       );
       throw new Error(`Error actualizando celda: ${error.message}`);
     }
   }
 
-  /**
-   * Obtiene los headers del sheet
-   * @private
-   */
   async _getHeaders() {
     const response = await this.sheets.spreadsheets.values.get({
       spreadsheetId: config.googleSheets.sheetId,
-      range: "A1:Z1", // Asumiendo que no hay más de 26 columnas
+      range: "A1:Z1",
     });
 
     return response.data.values ? response.data.values[0] : [];
   }
 
-  /**
-   * Encuentra el índice de una columna por nombre (case-insensitive)
-   * @private
-   */
   _findColumnIndex(headers, columnName) {
     const searchName = columnName.toLowerCase();
 
-    // Buscar coincidencias exactas primero
     let index = headers.findIndex(
       (header) => header.toLowerCase() === searchName
     );
 
-    // Si no encuentra coincidencia exacta, buscar por inclusión
     if (index === -1) {
       index = headers.findIndex(
         (header) =>
@@ -188,10 +141,6 @@ class GoogleSheetsService {
     return index;
   }
 
-  /**
-   * Convierte índice numérico a letra de columna (A, B, C, ...)
-   * @private
-   */
   _getColumnLetter(index) {
     let letter = "";
     while (index >= 0) {
@@ -201,43 +150,17 @@ class GoogleSheetsService {
     return letter;
   }
 
-  /**
-   * Actualiza la columna "Notificado" para un predicador
-   */
   async markAsNotified(rowIndex, value = config.business.yesMarker) {
     return this.updateCell(rowIndex, "notificado", value);
   }
 
-  /**
-   * Actualiza la columna "Recordado" con la fecha actual
-   */
-  async markReminderSent(
-    rowIndex,
-    date = new Date().toISOString().split("T")[0]
-  ) {
-    return this.updateCell(rowIndex, "recordado", date);
-  }
-
-  /**
-   * Valida la configuración del servicio
-   */
   validateConfiguration() {
-    const errors = [];
-
     if (!config.googleSheets.sheetId) {
-      errors.push("GOOGLE_SHEET_ID no configurado");
+      throw new Error("Configuración inválida: GOOGLE_SHEET_ID no configurado");
     }
-
-    if (errors.length > 0) {
-      throw new Error(`Configuración inválida: ${errors.join(", ")}`);
-    }
-
     return true;
   }
 
-  /**
-   * Obtiene información de diagnóstico del servicio
-   */
   async getDiagnosticInfo() {
     try {
       await this._ensureAuth();
