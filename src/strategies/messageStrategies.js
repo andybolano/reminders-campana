@@ -20,6 +20,10 @@ class InvitacionStrategy extends MessageStrategy {
     const campaignStart = DateFormatter.parseToLocalDate(config.campaign.startDate);
     const daysUntil = Math.round(DateFormatter.daysDifference(campaignStart, DateFormatter.today()));
 
+    if (daysUntil <= 0) {
+      throw new Error("La campaña ya inició, no se pueden enviar invitaciones");
+    }
+
     return {
       from: fromNumber,
       to: `whatsapp:${visita.getFormattedPhone()}`,

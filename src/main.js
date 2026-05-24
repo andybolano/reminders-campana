@@ -102,7 +102,7 @@ class ReminderApp {
     const args = process.argv.slice(2);
 
     const tipoArg = args.find((a) => a.startsWith("--tipo="));
-    const tipo = tipoArg ? tipoArg.split("=")[1] : "invitacion";
+    const tipo = tipoArg ? tipoArg.split("=")[1] : this._detectTipo();
 
     if (args.includes("--test")) return { mode: "test", tipo };
     if (args.includes("--notifications")) return { mode: "notifications", tipo };
@@ -110,6 +110,12 @@ class ReminderApp {
     if (args.includes("--diagnostic")) return { mode: "diagnostic", tipo };
 
     return { mode: "once", tipo };
+  }
+
+  _detectTipo() {
+    const campaignStart = DateFormatter.parseToLocalDate(config.campaign.startDate);
+    const daysUntil = Math.round(DateFormatter.daysDifference(campaignStart, DateFormatter.today()));
+    return daysUntil > 0 ? "invitacion" : "recordatorio";
   }
 
   _showStartupInfo() {
